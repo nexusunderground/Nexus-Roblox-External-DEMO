@@ -6,7 +6,6 @@ use crate::core::memory::{is_valid_address, Memory};
 use crate::core::offsets::{humanoid, player};
 use crate::sdk::Instance;
 
-/// Represents a Roblox Player object.
 pub struct Player {
     instance: Instance,
 }
@@ -45,20 +44,16 @@ impl Player {
         ModelInstance::new(model_addr, Arc::clone(self.instance.memory()))
     }
 
-    /// BrickColor from Player.TeamColor — same value => same team.
     pub fn get_team_color(&self) -> u32 {
         self.instance.memory().read::<u32>(self.instance.address + player::team_color())
     }
 
-    /// Often 0 in games without Teams service.
-    /// Team check now uses whitelist system — see config.visuals.teammate_whitelist.
     pub fn get_team_address(&self) -> u64 {
         let team_offset = player::team();
         self.instance.memory().read::<u64>(self.instance.address + team_offset)
     }
 }
 
-/// Represents a character model (Humanoid's parent).
 pub struct ModelInstance {
     instance: Instance,
 }
@@ -99,7 +94,6 @@ impl ModelInstance {
     }
 }
 
-/// Represents a Humanoid (character controller).
 pub struct Humanoid {
     pub address: u64,
     memory: Arc<Memory>,
@@ -115,7 +109,6 @@ impl Humanoid {
         is_valid_address(self.address)
     }
 
-    /// Get rig type: 0 = R6, 1 = R15.
     pub fn get_rig_type(&self) -> u8 {
         self.memory.read::<u8>(self.address + humanoid::rig_type())
     }

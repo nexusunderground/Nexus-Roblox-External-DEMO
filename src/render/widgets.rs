@@ -3,19 +3,17 @@ use eframe::egui;
 use super::theme;
 use crate::config::{BindableFeature, HotkeyKey, HotkeySlot};
 
-/// Section header, bold uppercase.
 pub fn section_header(ui: &mut egui::Ui, text: &str) {
-    ui.add_space(5.0);
+    ui.add_space(8.0);
     ui.label(
         egui::RichText::new(text.to_uppercase())
-            .size(10.0)
+            .size(11.0)
             .color(theme::TEXT_HEADER)
             .strong(),
     );
-    ui.add_space(2.0);
+    ui.add_space(3.0);
 }
 
-/// Double-bordered frame with accent underline header.
 pub fn double_border_frame(
     ui: &mut egui::Ui,
     title: &str,
@@ -32,27 +30,27 @@ pub fn double_border_frame(
                 .fill(theme::BG_FRAME_INNER)
                 .stroke(egui::Stroke::new(1.0, theme::BORDER_FRAME_INNER))
                 .rounding(2.0)
-                .inner_margin(egui::Margin::symmetric(8.0, 5.0))
+                .inner_margin(egui::Margin::symmetric(8.0, 6.0))
                 .show(ui, |ui| {
                     ui.label(
                         egui::RichText::new(title.to_uppercase())
-                            .size(10.0)
+                            .size(11.0)
                             .color(theme::TEXT_HEADER)
                             .strong(),
                     );
                     
-                    let bar_width = ui.available_width().min(50.0);
+                    let bar_width = ui.available_width().min(60.0);
                     let bar_size = egui::vec2(bar_width, 2.0);
                     let (bar_rect, _) = ui.allocate_exact_size(bar_size, egui::Sense::hover());
                     ui.painter().rect_filled(bar_rect, 1.0, accent);
                     
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
+                    
                     add_contents(ui);
                 });
         });
 }
 
-/// Styled checkbox with highlight glow when enabled.
 pub fn styled_checkbox(ui: &mut egui::Ui, value: &mut bool, label: &str, hotkey: Option<&str>) {
     ui.horizontal(|ui| {
         let size = egui::vec2(12.0, 12.0);
@@ -78,7 +76,7 @@ pub fn styled_checkbox(ui: &mut egui::Ui, value: &mut bool, label: &str, hotkey:
         }
 
         ui.add_space(6.0);
-
+        
         let label_color = if *value { 
             theme::ACCENT_SECONDARY 
         } else { 
@@ -101,16 +99,13 @@ pub fn styled_checkbox(ui: &mut egui::Ui, value: &mut bool, label: &str, hotkey:
         }
     });
 
-    ui.add_space(1.0);
+    ui.add_space(2.0);
 }
 
-/// Styled toggle (delegates to checkbox).
 pub fn styled_toggle(ui: &mut egui::Ui, value: &mut bool, label: &str, hotkey: Option<&str>) {
-    // Use the new checkbox style
     styled_checkbox(ui, value, label, hotkey);
 }
 
-/// Styled slider with label and value.
 pub fn styled_slider(
     ui: &mut egui::Ui,
     label: &str,
@@ -123,7 +118,7 @@ pub fn styled_slider(
     });
 
     ui.add_space(2.0);
-
+    
     let desired_size = egui::vec2(ui.available_width(), 14.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
     
@@ -139,9 +134,11 @@ pub fn styled_slider(
         let max = *range.end();
         let t = (*value - min) / (max - min);
         
+        // Background track
         ui.painter().rect_filled(rect, 2.0, theme::BG_LIGHT);
         ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, theme::BORDER_DEFAULT));
         
+        // Filled portion
         let fill_width = rect.width() * t;
         if fill_width > 0.0 {
             let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_width, rect.height()));
@@ -158,10 +155,9 @@ pub fn styled_slider(
     };
     ui.label(egui::RichText::new(text).size(10.0).color(theme::TEXT_MUTED));
     
-    ui.add_space(3.0);
+    ui.add_space(4.0);
 }
 
-/// Slider with inline editable text input.
 pub fn editable_slider(
     ui: &mut egui::Ui,
     label: &str,
@@ -172,7 +168,7 @@ pub fn editable_slider(
 ) {
     let min = *range.start();
     let max = *range.end();
-
+    
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label.to_lowercase()).size(11.0).color(theme::TEXT_SECONDARY));
         
@@ -254,7 +250,7 @@ pub fn editable_slider(
     });
 
     ui.add_space(2.0);
-
+    
     let desired_size = egui::vec2(ui.available_width(), 14.0);
     let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click_and_drag());
     
@@ -268,9 +264,11 @@ pub fn editable_slider(
     if ui.is_rect_visible(rect) {
         let t = (*value - min) / (max - min);
         
+        // Background track
         ui.painter().rect_filled(rect, 2.0, theme::BG_LIGHT);
         ui.painter().rect_stroke(rect, 2.0, egui::Stroke::new(1.0, theme::BORDER_DEFAULT));
         
+        // Filled portion
         let fill_width = rect.width() * t;
         if fill_width > 0.0 {
             let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_width, rect.height()));
@@ -281,7 +279,6 @@ pub fn editable_slider(
     ui.add_space(4.0);
 }
 
-/// Bone selection combo box.
 pub fn bone_selector(ui: &mut egui::Ui, label: &str, value: &mut String, id: &str) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label.to_lowercase()).size(10.0).color(theme::TEXT_SECONDARY));
@@ -300,7 +297,6 @@ pub fn bone_selector(ui: &mut egui::Ui, label: &str, value: &mut String, id: &st
     });
 }
 
-/// Activation mode combo box.
 pub fn activation_mode_selector(ui: &mut egui::Ui, label: &str, value: &mut u8, id: &str) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label.to_lowercase()).size(10.0).color(theme::TEXT_SECONDARY));
@@ -330,7 +326,6 @@ pub fn fly_mode_selector(ui: &mut egui::Ui, label: &str, value: &mut u8, id: &st
         ui.label(egui::RichText::new(label.to_lowercase()).size(10.0).color(theme::TEXT_SECONDARY));
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Clamp old mode 2 values to mode 1
             if *value > 1 {
                 *value = 1;
             }
@@ -338,7 +333,7 @@ pub fn fly_mode_selector(ui: &mut egui::Ui, label: &str, value: &mut u8, id: &st
                 0 => "Velocity",
                 _ => "Stable",
             };
-            let display_text = format!("{}", display);
+            let display_text = format!("{} v", display);
             egui::ComboBox::from_id_source(id)
                 .selected_text(egui::RichText::new(display_text).color(theme::ACCENT_PRIMARY))
                 .width(90.0)
@@ -350,10 +345,8 @@ pub fn fly_mode_selector(ui: &mut egui::Ui, label: &str, value: &mut u8, id: &st
     });
 }
 
-/// Write intensity selector (writes per second).
 pub fn write_intensity_selector(ui: &mut egui::Ui, value: &mut u8) {
     ui.horizontal(|ui| {
-        // 1 = Low (fast), 2 = Medium, 3 = High (stable)
         let labels = [(1u8, "Low (60/s)"), (2u8, "Med (120/s)"), (3u8, "High (180/s)")];
         for (v, label) in labels {
             let selected = *value == v;
@@ -371,7 +364,6 @@ pub fn write_intensity_selector(ui: &mut egui::Ui, value: &mut u8) {
     });
 }
 
-/// Collapsible aim section header with toggle. Returns true if expanded.
 pub fn aim_section_header(
     ui: &mut egui::Ui,
     title: &str,
@@ -382,7 +374,7 @@ pub fn aim_section_header(
     hotkey: Option<&str>,
 ) -> bool {
     let is_expanded = *expanded_section == section_id;
-
+    
     egui::Frame::none()
         .fill(theme::BG_FRAME)
         .stroke(egui::Stroke::new(1.0, if *enabled { theme::BORDER_ACTIVE } else { theme::BORDER_FRAME }))
@@ -406,7 +398,7 @@ pub fn aim_section_header(
                 }
                 
                 ui.add_space(6.0);
-
+                
                 let title_response = ui.add(
                     egui::Label::new(
                         egui::RichText::new(title.to_lowercase())
@@ -422,21 +414,18 @@ pub fn aim_section_header(
                         *expanded_section = section_id;
                     }
                 }
-
+                
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // unicode chevrons don't render in egui, use ascii
-                    let arrow = if is_expanded { "-" } else { "+" };
+                    let arrow = if is_expanded { "^" } else { "v" };
                     if ui.add(
                         egui::Button::new(
                             egui::RichText::new(arrow)
-                                .size(12.0)
+                                .size(10.0)
                                 .color(theme::ACCENT_PRIMARY)
-                                .strong()
                         )
                         .fill(theme::BG_DARK)
                         .stroke(egui::Stroke::new(1.0, theme::BORDER_DEFAULT))
-                        .rounding(2.0)
-                        .min_size(egui::vec2(20.0, 20.0))
+                        .min_size(egui::vec2(18.0, 18.0))
                     ).on_hover_text(if is_expanded { "Collapse" } else { "Expand options" }).clicked() {
                         if is_expanded {
                             *expanded_section = 0;
@@ -444,14 +433,14 @@ pub fn aim_section_header(
                             *expanded_section = section_id;
                         }
                     }
-
+                    
                     if let Some(key) = hotkey {
                         ui.add_space(4.0);
                         ui.label(egui::RichText::new(key).size(9.0).color(theme::ACCENT_PRIMARY).strong());
                     }
                 });
             });
-
+            
             if !is_expanded {
                 if let Some(desc) = description {
                     ui.label(egui::RichText::new(desc).size(8.0).color(theme::TEXT_MUTED));
@@ -463,9 +452,7 @@ pub fn aim_section_header(
     is_expanded
 }
 
-/// Hotkey slot with key selector and feature dropdown.
 pub fn hotkey_slot(ui: &mut egui::Ui, slot_index: usize, slot: &mut HotkeySlot) {
-    // opaque background needed for combo popups
     let combo_style = ui.style_mut();
     combo_style.visuals.widgets.inactive.weak_bg_fill = theme::BG_DARK;
     combo_style.visuals.widgets.hovered.weak_bg_fill = theme::BG_MEDIUM;
@@ -479,7 +466,7 @@ pub fn hotkey_slot(ui: &mut egui::Ui, slot_index: usize, slot: &mut HotkeySlot) 
                 .size(10.0)
                 .color(theme::TEXT_MUTED)
         );
-
+        
         let key_id = format!("hotkey_key_{}", slot_index);
         egui::ComboBox::from_id_source(&key_id)
             .selected_text(egui::RichText::new(slot.key.display_name()).size(10.0).color(theme::ACCENT_PRIMARY))
@@ -496,7 +483,7 @@ pub fn hotkey_slot(ui: &mut egui::Ui, slot_index: usize, slot: &mut HotkeySlot) 
             });
         
         ui.label(egui::RichText::new("→").size(10.0).color(theme::TEXT_MUTED));
-
+        
         let feature_id = format!("hotkey_feature_{}", slot_index);
         let display_text = if slot.feature == BindableFeature::None {
             "Select Feature...".to_string()
@@ -517,7 +504,6 @@ pub fn hotkey_slot(ui: &mut egui::Ui, slot_index: usize, slot: &mut HotkeySlot) 
                         let mut current_category = "";
                         for feature in BindableFeature::all_features() {
                             let category = feature.category();
-                            // Add category header when category changes
                             if !category.is_empty() && category != current_category {
                                 if !current_category.is_empty() {
                                     ui.add_space(4.0);
@@ -535,84 +521,4 @@ pub fn hotkey_slot(ui: &mut egui::Ui, slot_index: usize, slot: &mut HotkeySlot) 
                     });
             });
     });
-}
-
-/// Premium (demo-locked) feature toggle.
-/// Reverts to OFF and shows popup when toggled on.
-pub fn premium_feature_toggle(ui: &mut egui::Ui, value: &mut bool, label: &str, hotkey: Option<&str>) {
-    let was_off = !*value;
-    styled_checkbox(ui, value, label, hotkey);
-    if was_off && *value {
-        *value = false;
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("premium_popup_show"), true));
-    }
-}
-
-/// Guard premium feature toggle state from compound widgets.
-pub fn guard_premium_feature(ctx: &egui::Context, value: &mut bool, was_off: bool) {
-    if was_off && *value {
-        *value = false;
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new("premium_popup_show"), true));
-    }
-}
-
-/// Premium upsell popup. Call once per frame.
-pub fn render_premium_popup(ctx: &egui::Context) {
-    let show = ctx.data_mut(|d| d.get_temp::<bool>(egui::Id::new("premium_popup_show")).unwrap_or(false));
-    
-    if !show {
-        return;
-    }
-    
-    egui::Window::new("Premium Feature")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .fixed_size([300.0, 0.0])
-        .frame(
-            egui::Frame::default()
-                .fill(theme::BG_DARK)
-                .stroke(egui::Stroke::new(2.0, theme::ACCENT_PRIMARY))
-                .rounding(6.0)
-                .inner_margin(egui::Margin::same(16.0))
-        )
-        .show(ctx, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(4.0);
-                ui.label(
-                    egui::RichText::new("This is a premium feature")
-                        .size(14.0)
-                        .color(theme::TEXT_PRIMARY)
-                        .strong(),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new("Please join the discord for full access")
-                        .size(11.0)
-                        .color(theme::TEXT_SECONDARY),
-                );
-                ui.add_space(10.0);
-                ui.hyperlink_to(
-                    egui::RichText::new("Nexus Underground - Discord")
-                        .size(12.0)
-                        .color(theme::ACCENT_PRIMARY)
-                        .underline(),
-                    "https://tr.ee/NexusD",
-                );
-                ui.add_space(12.0);
-                if ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("OK")
-                            .size(11.0)
-                            .color(theme::TEXT_PRIMARY)
-                    )
-                    .fill(theme::BG_MEDIUM)
-                    .stroke(egui::Stroke::new(1.0, theme::ACCENT_PRIMARY))
-                    .min_size(egui::vec2(80.0, 28.0))
-                ).clicked() {
-                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("premium_popup_show"), false));
-                }
-                ui.add_space(4.0);
-            });
-        });
 }

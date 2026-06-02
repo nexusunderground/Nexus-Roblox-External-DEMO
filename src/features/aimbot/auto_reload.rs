@@ -1,3 +1,5 @@
+// Auto reload - presses R when ammo is 0.
+
 #![allow(dead_code)]
 
 use std::sync::Arc;
@@ -65,6 +67,7 @@ impl AutoReload {
         }
         let character = Instance::new(character_addr, Arc::clone(memory));
 
+        // Find equipped Tool in character, when a tool is equipped, it becomes a child of the character
         let tool = character
             .get_children()
             .into_iter()
@@ -77,6 +80,7 @@ impl AutoReload {
             return; 
         };
 
+        // Find Ammo value in tool - check common names
         let ammo_names = ["Ammo", "ammo", "CurrentAmmo", "Clip", "Bullets", "Magazine"];
         let ammo = ammo_names.iter()
             .find_map(|name| tool.find_first_child(name));
@@ -110,7 +114,7 @@ impl AutoReload {
                 keybd_event, MapVirtualKeyW, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC,
             };
 
-            let vk_r = 0x52;
+            let vk_r = 0x52; // VK_R
             let scan_code = MapVirtualKeyW(vk_r, MAPVK_VK_TO_VSC) as u8;
             
             keybd_event(0, scan_code, KEYEVENTF_SCANCODE, 0);

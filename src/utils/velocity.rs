@@ -1,13 +1,41 @@
+//! Shared velocity tracking for prediction across all aim systems.
+//! 
+//! Two variants:
+//! - `VelocityTracker`: Simple EMA with adaptive alpha + acceleration (camera_aim, viewport, silentaim)
+//! - `RingVelocityTracker`: Ring-buffer EMA with stationary detection (targeting/aim_assist)
+
 use std::time::Instant;
 use crate::utils::math::Vector3;
 
-pub const VELOCITY_THRESHOLD: f32 = 0.5; // studs/sec, minimum to count as "moving"
-pub const VELOCITY_EMA_ALPHA: f32 = 0.32; // lower = smoother, higher = responsive
-pub const ACCEL_EMA_ALPHA: f32 = 0.22;
-pub const VELOCITY_OUTLIER_THRESHOLD: f32 = 80.0; // studs/sec, reject teleport spikes
-pub const STATIONARY_THRESHOLD: f32 = 1.5; // studs/sec
-pub const INTERPOLATION_TIME: f32 = 0.008; // seconds, for ESP/chams position smoothing
+// ============================================================================
+// Constants
+// ============================================================================
 
+/// Minimum velocity to consider "moving" (studs/sec)
+pub const VELOCITY_THRESHOLD: f32 = 0.5;
+
+/// EMA alpha for velocity smoothing (lower = smoother, higher = more responsive)
+pub const VELOCITY_EMA_ALPHA: f32 = 0.32;
+
+/// EMA alpha for acceleration smoothing
+pub const ACCEL_EMA_ALPHA: f32 = 0.22;
+
+/// Speed above this is rejected as teleport/glitch (studs/sec)
+pub const VELOCITY_OUTLIER_THRESHOLD: f32 = 80.0;
+
+/// Speed below which target is considered stationary (studs/sec)
+pub const STATIONARY_THRESHOLD: f32 = 1.5;
+
+/// Position interpolation time step (seconds) for visual smoothing.
+/// Used by ESP and chams to interpolate positions between cache updates.
+pub const INTERPOLATION_TIME: f32 = 0.008;
+
+// ============================================================================
+// Simple VelocityTracker (used by camera_aim, viewport, silentaim)
+// ============================================================================
+
+/// Simple EMA velocity + acceleration tracker.
+/// Lightweight, suitable for per-entity tracking in any aim system.
 pub struct VelocityTracker {
     last_pos: Vector3,
     last_time: Instant,
@@ -75,9 +103,21 @@ impl VelocityTracker {
             current_pos.z + self.velocity.z * time_ahead + 0.5 * self.acceleration.z * time_ahead * time_ahead,
         )
     }
+
+    /// Returns seconds since this tracker was last updated.
+    /// Used to prune stale per-entity trackers when players disconnect.
+    #[inline]
+    pub fn elapsed_secs(&self) -> f32 {
+        self.last_time.elapsed().as_secs_f32()
+    }
 }
 
-/// Ring-buffer EMA velocity tracker with stationary detection.
+// ============================================================================
+// Ring-buffer VelocityTracker (used by targeting/aim_assist)
+// ============================================================================
+
+/// Advanced ring-buffer EMA velocity tracker with stationary detection.
+/// Uses 5-sample history for better smoothing and outlier handling.
 pub struct RingVelocityTracker {
     positions: [(Vector3, Instant); 5],
     index: usize,
@@ -89,6 +129,7 @@ pub struct RingVelocityTracker {
     stationary_frames: u32,
 }
 
+/// EMA alpha for the ring-buffer tracker (slightly tighter than simple tracker)
 const RING_VELOCITY_EMA_ALPHA: f32 = 0.28;
 
 impl RingVelocityTracker {
@@ -182,32 +223,37 @@ impl RingVelocityTracker {
 
 }
 
+// ============================================================================
+// Shared team check utility
+// ============================================================================
+
 use crate::utils::cache::Entity;
-use crate::utils::game_support::GameId;
 use ahash::AHashSet;
 
-/// Returns true if the entity is on the local player's team.
+/// Teammate check — returns true if entity is on the same team as local player.
+/// Uses standard Roblox Teams (team_address match) + has_teammate_label fallback + whitelist.
 #[inline]
 pub fn is_teammate(
     entity: &Entity,
     team_check_enabled: bool,
     local_team: u64,
     teammate_addresses: &AHashSet<u64>,
-    _local_team_identifier: &str,
-    _game_id: GameId,
 ) -> bool {
     if !team_check_enabled {
         return false;
     }
 
+    // Whitelist (manual name → model address lookup — always applies)
     if teammate_addresses.contains(&entity.model_address) {
         return true;
     }
 
+    // Standard Roblox Teams: same team address = teammate
     if local_team != 0 && entity.team_address == local_team {
         return true;
     }
 
+    // TeammateLabel fallback (game-specific detection stored during cache build)
     if entity.has_teammate_label {
         return true;
     }

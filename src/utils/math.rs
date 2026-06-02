@@ -313,7 +313,6 @@ impl Matrix4 {
 
     pub const ZERO: Self = Self { m: [[0.0; 4]; 4] };
 
-    /// Transform a Vector4 by this matrix.
     #[inline]
     pub fn transform(&self, v: Vector4) -> Vector4 {
         Vector4::new(
@@ -324,7 +323,6 @@ impl Matrix4 {
         )
     }
 
-    /// Transform a Vector3 point (assumes w=1).
     #[inline]
     pub fn transform_point(&self, v: Vector3) -> Vector3 {
         let v4 = self.transform(Vector4::new(v.x, v.y, v.z, 1.0));

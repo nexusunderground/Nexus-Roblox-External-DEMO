@@ -1,7 +1,67 @@
 #![allow(dead_code)]
 
 #[cfg(target_os = "windows")]
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, SendInput, INPUT, INPUT_MOUSE, INPUT_KEYBOARD, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, MapVirtualKeyW, MAPVK_VK_TO_VSC};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, SendInput, INPUT, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntheticInputSource {
+    Triggerbot,
+    CameraTriggerbot,
+    ViewportTriggerbot,
+    SilentTriggerbot,
+    BladeBall,
+    AutoClicker,
+    Unknown,
+}
+
+impl SyntheticInputSource {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Triggerbot => "triggerbot",
+            Self::CameraTriggerbot => "camera_triggerbot",
+            Self::ViewportTriggerbot => "viewport_triggerbot",
+            Self::SilentTriggerbot => "silent_triggerbot",
+            Self::BladeBall => "blade_ball",
+            Self::AutoClicker => "autoclicker",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SyntheticClickStats {
+    pub total: u64,
+    pub triggerbot: u64,
+    pub camera_triggerbot: u64,
+    pub viewport_triggerbot: u64,
+    pub silent_triggerbot: u64,
+    pub blade_ball: u64,
+    pub autoclicker: u64,
+    pub unknown: u64,
+}
+
+static SYN_TOTAL: AtomicU64 = AtomicU64::new(0);
+static SYN_TRIGGERBOT: AtomicU64 = AtomicU64::new(0);
+static SYN_CAMERA_TRIGGERBOT: AtomicU64 = AtomicU64::new(0);
+static SYN_VIEWPORT_TRIGGERBOT: AtomicU64 = AtomicU64::new(0);
+static SYN_SILENT_TRIGGERBOT: AtomicU64 = AtomicU64::new(0);
+static SYN_BLADE_BALL: AtomicU64 = AtomicU64::new(0);
+static SYN_AUTOCLICKER: AtomicU64 = AtomicU64::new(0);
+static SYN_UNKNOWN: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+fn bump_source_counter(source: SyntheticInputSource) {
+    match source {
+        SyntheticInputSource::Triggerbot => { SYN_TRIGGERBOT.fetch_add(1, Ordering::Relaxed); }
+        SyntheticInputSource::CameraTriggerbot => { SYN_CAMERA_TRIGGERBOT.fetch_add(1, Ordering::Relaxed); }
+        SyntheticInputSource::ViewportTriggerbot => { SYN_VIEWPORT_TRIGGERBOT.fetch_add(1, Ordering::Relaxed); }
+        SyntheticInputSource::SilentTriggerbot => { SYN_SILENT_TRIGGERBOT.fetch_add(1, Ordering::Relaxed); }
+        SyntheticInputSource::BladeBall => { SYN_BLADE_BALL.fetch_add(1, Ordering::Relaxed); }
+        SyntheticInputSource::AutoClicker => { SYN_AUTOCLICKER.fetch_add(1, Ordering::Relaxed); }
+        SyntheticInputSource::Unknown => { SYN_UNKNOWN.fetch_add(1, Ordering::Relaxed); }
+    }
+}
 
 pub struct Input;
 
@@ -39,8 +99,33 @@ impl Input {
         }
     }
 
+
+    pub fn note_synthetic_click(source: SyntheticInputSource, _button: &'static str) {
+        SYN_TOTAL.fetch_add(1, Ordering::Relaxed);
+        bump_source_counter(source);
+    }
+
+    pub fn take_synthetic_click_stats() -> SyntheticClickStats {
+        SyntheticClickStats {
+            total: SYN_TOTAL.swap(0, Ordering::Relaxed),
+            triggerbot: SYN_TRIGGERBOT.swap(0, Ordering::Relaxed),
+            camera_triggerbot: SYN_CAMERA_TRIGGERBOT.swap(0, Ordering::Relaxed),
+            viewport_triggerbot: SYN_VIEWPORT_TRIGGERBOT.swap(0, Ordering::Relaxed),
+            silent_triggerbot: SYN_SILENT_TRIGGERBOT.swap(0, Ordering::Relaxed),
+            blade_ball: SYN_BLADE_BALL.swap(0, Ordering::Relaxed),
+            autoclicker: SYN_AUTOCLICKER.swap(0, Ordering::Relaxed),
+            unknown: SYN_UNKNOWN.swap(0, Ordering::Relaxed),
+        }
+    }
+
     #[cfg(target_os = "windows")]
     pub fn click_mouse() {
+        Self::click_mouse_from(SyntheticInputSource::Unknown);
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn click_mouse_from(source: SyntheticInputSource) {
+        Self::note_synthetic_click(source, "LMB");
         unsafe {
             let down = INPUT {
                 r#type: INPUT_MOUSE,
@@ -70,17 +155,15 @@ impl Input {
                 },
             };
 
-            // separate down/up so roblox registers it across frames
             SendInput(&[down], std::mem::size_of::<INPUT>() as i32);
-            // ~40ms hold = 2-3 frames at 60fps
             std::thread::sleep(std::time::Duration::from_millis(40));
             SendInput(&[up], std::mem::size_of::<INPUT>() as i32);
         }
     }
 
-    /// Fast mouse click with 12ms hold (Blade Ball auto-parry).
     #[cfg(target_os = "windows")]
-    pub fn click_mouse_fast() {
+    pub fn click_mouse_fast_from(source: SyntheticInputSource) {
+        Self::note_synthetic_click(source, "LMB");
         unsafe {
             let down = INPUT {
                 r#type: INPUT_MOUSE,
@@ -110,6 +193,48 @@ impl Input {
             };
             SendInput(&[down], std::mem::size_of::<INPUT>() as i32);
             std::thread::sleep(std::time::Duration::from_millis(12));
+            SendInput(&[up], std::mem::size_of::<INPUT>() as i32);
+        }
+    }
+
+
+    #[cfg(target_os = "windows")]
+    pub fn mouse_down_from(source: SyntheticInputSource) {
+        Self::note_synthetic_click(source, "LMB");
+        unsafe {
+            let down = INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                    mi: windows::Win32::UI::Input::KeyboardAndMouse::MOUSEINPUT {
+                        dx: 0,
+                        dy: 0,
+                        mouseData: 0,
+                        dwFlags: MOUSEEVENTF_LEFTDOWN,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+            SendInput(&[down], std::mem::size_of::<INPUT>() as i32);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub fn mouse_up_from(_source: SyntheticInputSource) {
+        unsafe {
+            let up = INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                    mi: windows::Win32::UI::Input::KeyboardAndMouse::MOUSEINPUT {
+                        dx: 0,
+                        dy: 0,
+                        mouseData: 0,
+                        dwFlags: MOUSEEVENTF_LEFTUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
             SendInput(&[up], std::mem::size_of::<INPUT>() as i32);
         }
     }
@@ -156,82 +281,6 @@ impl Input {
         }
     }
 
-    /// Simulate a key press with 40ms hold for Roblox input polling.
-    #[cfg(target_os = "windows")]
-    pub fn send_key(vk_code: u16) {
-        unsafe {
-            // roblox requires hardware scan codes
-            let scan = MapVirtualKeyW(vk_code as u32, MAPVK_VK_TO_VSC) as u16;
-
-            let key_down = INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk_code),
-                        wScan: scan,
-                        dwFlags: KEYBD_EVENT_FLAGS(0),
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            };
-            let key_up = INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk_code),
-                        wScan: scan,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            };
-
-            // separate down/up so roblox registers it across frames
-            SendInput(&[key_down], std::mem::size_of::<INPUT>() as i32);
-            // ~40ms hold = 2-3 frames at 60fps
-            std::thread::sleep(std::time::Duration::from_millis(40));
-            SendInput(&[key_up], std::mem::size_of::<INPUT>() as i32);
-        }
-    }
-
-    /// Fast key press with 12ms hold (Blade Ball auto-parry).
-    #[cfg(target_os = "windows")]
-    pub fn send_key_fast(vk_code: u16) {
-        unsafe {
-            let scan = MapVirtualKeyW(vk_code as u32, MAPVK_VK_TO_VSC) as u16;
-            let key_down = INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk_code),
-                        wScan: scan,
-                        dwFlags: KEYBD_EVENT_FLAGS(0),
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            };
-            let key_up = INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk_code),
-                        wScan: scan,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        time: 0,
-                        dwExtraInfo: 0,
-                    },
-                },
-            };
-            SendInput(&[key_down], std::mem::size_of::<INPUT>() as i32);
-            std::thread::sleep(std::time::Duration::from_millis(12));
-            SendInput(&[key_up], std::mem::size_of::<INPUT>() as i32);
-        }
-    }
-
-    /// Returns (W, A, S, D, Space, Ctrl) key states.
     #[cfg(target_os = "windows")]
     pub fn get_movement_keys() -> (bool, bool, bool, bool, bool, bool) {
         (
@@ -240,19 +289,6 @@ impl Input {
             Self::is_key_down(0x53), // S
             Self::is_key_down(0x44), // D
             Self::is_key_down(0x20), // Space (up)
-            Self::is_key_down(0x11) || Self::is_key_down(0xA2) || Self::is_key_down(0xA3), // Ctrl/LCtrl/RCtrl (down)
-        )
-    }
-
-    /// Returns (W, A, S, D, CapsLock, Ctrl) — CapsLock replaces Space (exits vehicles).
-    #[cfg(target_os = "windows")]
-    pub fn get_vehicle_movement_keys() -> (bool, bool, bool, bool, bool, bool) {
-        (
-            Self::is_key_down(0x57), // W
-            Self::is_key_down(0x41), // A
-            Self::is_key_down(0x53), // S
-            Self::is_key_down(0x44), // D
-            Self::is_key_down(0x14), // CapsLock (up) - 0x14 = VK_CAPITAL
             Self::is_key_down(0x11) || Self::is_key_down(0xA2) || Self::is_key_down(0xA3), // Ctrl/LCtrl/RCtrl (down)
         )
     }

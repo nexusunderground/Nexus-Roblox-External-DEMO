@@ -1,14 +1,21 @@
+// chams.rs - Professional OBB + Convex Hull Chams
+// Inspired by Despair's accurate silhouette approach with Nexus improvements
+
 use ahash::AHashSet;
 use eframe::egui;
 use rayon::prelude::*;
+use smallvec::SmallVec;
 use std::sync::Arc;
 
 use crate::config::Config;
 use crate::sdk::VisualEngine;
-use crate::utils::cache::{Cache, BodyPart, PartData};
-use crate::utils::map_parser::get_map_parser;
+use crate::utils::cache::{Cache, BodyPart, Entity, PartData};
 use crate::utils::math::{Matrix4, Vector2, Vector3};
 use crate::utils::velocity::{is_teammate, INTERPOLATION_TIME};
+
+// ============================================================================
+// OBB Corner Definitions (local space, normalized)
+// ============================================================================
 
 /// The 8 corners of a unit cube centered at origin
 const OBB_CORNERS: [Vector3; 8] = [
@@ -22,10 +29,15 @@ const OBB_CORNERS: [Vector3; 8] = [
     Vector3 { x:  1.0, y:  1.0, z:  1.0 },
 ];
 
+// ============================================================================
+// Pre-computed Data Structures
+// ============================================================================
+
 /// Convex hull polygon for a single body part
+#[derive(Clone)]
 struct PartHull {
-    /// Screen-space vertices of the convex hull
-    vertices: Vec<Vector2>,
+    /// Screen-space vertices of the convex hull (stack-allocated for <= 8 verts)
+    vertices: SmallVec<[Vector2; 8]>,
     /// Whether this body part is behind a wall (occluded)
     is_occluded: bool,
 }
@@ -46,9 +58,13 @@ struct ChamsEntityData {
     occluded_outline_color: egui::Color32,
 }
 
-/// Compute 2D convex hull using Andrew's monotone chain algorithm.
-/// Returns vertices in counter-clockwise order.
-fn compute_convex_hull(mut points: Vec<Vector2>) -> Vec<Vector2> {
+// ============================================================================
+// Convex Hull Algorithm (Andrew's Monotone Chain)
+// ============================================================================
+
+/// Compute 2D convex hull from a set of points using Andrew's monotone chain algorithm
+/// Returns vertices in counter-clockwise order
+fn compute_convex_hull(mut points: SmallVec<[Vector2; 8]>) -> SmallVec<[Vector2; 8]> {
     if points.len() < 3 {
         return points;
     }
@@ -69,7 +85,8 @@ fn compute_convex_hull(mut points: Vec<Vector2>) -> Vec<Vector2> {
         return points;
     }
 
-    let mut hull: Vec<Vector2> = Vec::with_capacity(points.len() * 2);
+    // Working buffer: monotone chain can temporarily hold up to 2*n entries
+    let mut hull: SmallVec<[Vector2; 16]> = SmallVec::new();
 
     // Build lower hull
     for p in &points {
@@ -102,9 +119,15 @@ fn compute_convex_hull(mut points: Vec<Vector2>) -> Vec<Vector2> {
     }
 
     hull.pop(); // Remove duplicate last point
-    hull
+    // Convert back to 8-inline SmallVec (final hull is always <= 8 verts)
+    SmallVec::from_iter(hull)
 }
 
+// ============================================================================
+// Chams Renderer
+// ============================================================================
+
+/// Professional chams rendering system with OBB projection and convex hull silhouettes.
 pub struct Chams;
 
 impl Chams {
@@ -141,9 +164,11 @@ impl Chams {
             pos.z + velocity.z * INTERPOLATION_TIME,
         );
 
-        // Project all 8 OBB corners
-        let mut screen_points: Vec<Vector2> = Vec::with_capacity(8);
+        // Project all 8 OBB corners (stack-allocated — no heap alloc for <= 8 points)
+        let mut screen_points: SmallVec<[Vector2; 8]> = SmallVec::new();
 
+        {
+        crate::perf_scope!("mesh_chams_hull_project");
         for corner in &OBB_CORNERS {
             // Scale corner by half-size (OBB extents)
             let local = Vector3::new(
@@ -167,6 +192,7 @@ impl Chams {
                 ));
             }
         }
+        } // end mesh_chams_hull_project
 
         // Need at least 3 points for a hull
         if screen_points.len() < 3 {
@@ -174,9 +200,34 @@ impl Chams {
         }
 
         // Compute convex hull
+        crate::perf_scope!("mesh_chams_hull_compute");
         let hull = compute_convex_hull(screen_points);
-        
+
         if hull.len() < 3 {
+            return None;
+        }
+
+        // ── Window-rect cull (mirrors ESP Layer 2 in esp.rs) ──
+        // Skip parts whose hull bbox lies entirely outside the actual Roblox
+        // window. Without this, GUI chams keep drawing on the desktop when the
+        // Roblox window is smaller than / off-center on the overlay.
+        let screen_left   = window_offset.x;
+        let screen_top    = window_offset.y;
+        let screen_right  = window_offset.x + dimensions.x;
+        let screen_bottom = window_offset.y + dimensions.y;
+        let mut min_x = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for v in &hull {
+            if v.x < min_x { min_x = v.x; }
+            if v.x > max_x { max_x = v.x; }
+            if v.y < min_y { min_y = v.y; }
+            if v.y > max_y { max_y = v.y; }
+        }
+        if max_x < screen_left || min_x > screen_right
+            || max_y < screen_top || min_y > screen_bottom
+        {
             return None;
         }
 
@@ -195,6 +246,8 @@ impl Chams {
         if !config.visuals.chams {
             return;
         }
+        crate::perf_scope!("chams_render");
+
         let snapshot = cache.get_snapshot();
         if snapshot.is_empty() {
             return;
@@ -212,18 +265,15 @@ impl Chams {
         let target_highlight = config.visuals.target_highlight;
         let team_check = config.visuals.team_check;
         let hide_dead = config.visuals.hide_dead;
-        let wall_check = config.visuals.wall_check;
 
         // Get local player info
         let local_entity = snapshot
             .iter()
             .find(|e| e.name.eq_ignore_ascii_case(local_player_name));
-        
-        // Use Head position for wall checks — it's ~1.5 studs above HRP,
-        // which lifts the ray origin above floor surfaces and avoids
-        // false-positive blocks from floors the player is standing on.
+
+        // Use Head position for distance checks.
         // When dead/spectating, the local entity may be gone — fall back
-        // to the Camera position so distance/wall checks still work.
+        // to the Camera position so distance checks still work.
         let local_pos = local_entity
             .and_then(|e| {
                 if e.is_dead() { return None; }
@@ -233,13 +283,9 @@ impl Chams {
             })
             .or_else(|| visengine.get_camera_position())
             .unwrap_or(Vector3::ZERO);
-        
+
         let local_team = cache.get_local_team_addr();
-        
-        // Get game-specific team identifier (e.g., Phantom Forces)
-        let local_team_identifier = cache.get_local_team_id();
-        let game_id = cache.get_game_id();
-        
+
         let teammate_whitelist = &config.visuals.teammate_whitelist;
         let teammate_addresses: AHashSet<u64> = if team_check && !teammate_whitelist.is_empty() {
             snapshot.iter()
@@ -253,10 +299,19 @@ impl Chams {
         // Parallel computation for larger player counts
         let use_parallel = snapshot.len() > 4;
 
-        let compute_entity = |entity: &crate::utils::cache::Entity| -> Option<ChamsEntityData> {
+        let compute_entity = |entity: &Entity| -> Option<ChamsEntityData> {
             // Skip local player
             if entity.name.eq_ignore_ascii_case(local_player_name) {
                 return None;
+            }
+            // For obfuscated-name games (e.g. Bad Business), skip entity nearest to
+            // camera — that entity is always the local player. Mirrors esp_cache.rs.
+            if local_entity.is_none() {
+                if let Some(rp) = entity.root_part() {
+                    if rp.position.distance_to(local_pos) < 15.0 {
+                        return None;
+                    }
+                }
             }
 
             // Hide dead players
@@ -264,16 +319,19 @@ impl Chams {
                 return None;
             }
 
-            // Team check — game-aware dispatch (Rivals=TeammateLabel, PF=tag colour, default=Teams)
-            let is_team = is_teammate(
-                entity, team_check, local_team, &teammate_addresses, &local_team_identifier, game_id,
-            );
+            // Team check
+            let is_team = is_teammate(entity, team_check, local_team, &teammate_addresses);
+
+            // Hide teammates entirely if team_hide_visuals is on
+            if is_team && config.visuals.team_hide_visuals {
+                return None;
+            }
 
             // Get root part for distance check
             let root_part = entity.root_part()?;
 
             let root_pos = root_part.position;
-            
+
             if !root_pos.is_valid() || root_pos.is_near_origin(1.0) {
                 return None;
             }
@@ -289,7 +347,26 @@ impl Chams {
                     .unwrap_or(false);
 
             // Determine colors
-            let (fill_color, glow_color, outline_color) = if is_team {
+            let (fill_color, glow_color, outline_color) = if !entity.team_identifier.is_empty() {
+                // MM2: role-based coloring
+                match entity.team_identifier.as_str() {
+                    "Murderer" => (
+                        egui::Color32::from_rgba_unmultiplied(255, 60, 60, 100),
+                        egui::Color32::from_rgba_unmultiplied(255, 80, 80, 60),
+                        egui::Color32::from_rgba_unmultiplied(255, 120, 120, 220),
+                    ),
+                    "Sheriff" => (
+                        egui::Color32::from_rgba_unmultiplied(255, 215, 0, 100),
+                        egui::Color32::from_rgba_unmultiplied(255, 225, 50, 60),
+                        egui::Color32::from_rgba_unmultiplied(255, 235, 100, 220),
+                    ),
+                    _ => (
+                        egui::Color32::from_rgba_unmultiplied(140, 200, 140, 100),
+                        egui::Color32::from_rgba_unmultiplied(160, 220, 160, 60),
+                        egui::Color32::from_rgba_unmultiplied(180, 240, 180, 220),
+                    ),
+                }
+            } else if is_team {
                 // Blue for teammates
                 (
                     egui::Color32::from_rgba_unmultiplied(59, 130, 246, 100),
@@ -307,8 +384,27 @@ impl Chams {
                 Self::get_distance_colors(distance)
             };
 
-            // Occluded colors (dimmed red tint for parts behind walls)
-            let (occluded_fill, occluded_glow, occluded_outline) = if is_team {
+            // Occluded colors (dimmed tint for parts behind walls)
+            let (occluded_fill, occluded_glow, occluded_outline) = if !entity.team_identifier.is_empty() {
+                // MM2: dimmed role colors
+                match entity.team_identifier.as_str() {
+                    "Murderer" => (
+                        egui::Color32::from_rgba_unmultiplied(180, 40, 40, 70),
+                        egui::Color32::from_rgba_unmultiplied(200, 50, 50, 35),
+                        egui::Color32::from_rgba_unmultiplied(220, 70, 70, 150),
+                    ),
+                    "Sheriff" => (
+                        egui::Color32::from_rgba_unmultiplied(160, 135, 0, 70),
+                        egui::Color32::from_rgba_unmultiplied(180, 150, 30, 35),
+                        egui::Color32::from_rgba_unmultiplied(200, 170, 50, 150),
+                    ),
+                    _ => (
+                        egui::Color32::from_rgba_unmultiplied(70, 100, 70, 60),
+                        egui::Color32::from_rgba_unmultiplied(80, 110, 80, 30),
+                        egui::Color32::from_rgba_unmultiplied(90, 120, 90, 130),
+                    ),
+                }
+            } else if is_team {
                 (
                     egui::Color32::from_rgba_unmultiplied(30, 65, 123, 60),
                     egui::Color32::from_rgba_unmultiplied(48, 82, 125, 30),
@@ -325,19 +421,40 @@ impl Chams {
 
             let velocity = entity.velocity;
 
-            // Get map parser for per-part wall check
-            let map_parser = if wall_check { Some(get_map_parser()) } else { None };
+            // No wall check in demo build — always treat entity as visible.
+            let entity_occluded = false;
+
+            // cb_mode not applicable in demo build.
+            let cb_mode = false;
 
             // Compute convex hull for each cached body part (skip invisible HumanoidRootPart).
-            // Iterating all parts instead of a fixed rig list ensures custom rigs
-            // (e.g., Operation One's collision/hip/legs) render correctly.
             let part_hulls: Vec<PartHull> = {
+                crate::perf_scope!("chams_build_hulls");
                 entity.parts.iter()
-                .filter(|(bp, _)| **bp != BodyPart::HumanoidRootPart)
+                .filter(|(bp, part)| {
+                    let bp = **bp;
+                    if bp == BodyPart::HumanoidRootPart { return false; }
+                    // Skip parts with unresolved primitives (streaming not complete).
+                    if !part.position.is_valid() || (part.position.x == 0.0 && part.position.y == 0.0 && part.position.z == 0.0) {
+                        return false;
+                    }
+                    // CB perf: skip extremities at >100m (cb_mode is always false in demo)
+                    if cb_mode && distance > 100.0 {
+                        return !matches!(bp,
+                            BodyPart::LeftHand | BodyPart::RightHand |
+                            BodyPart::LeftFoot | BodyPart::RightFoot
+                        );
+                    }
+                    true
+                })
                 .filter_map(|(_, part)| {
-                    // Skip tiny parts at distance — projected size < ~5px
+                    // Skip tiny parts at distance — relaxed thresholds so heads
+                    // (~1.2 studs) survive at range.
                     let max_dim = part.size.x.max(part.size.y).max(part.size.z);
-                    if distance > 50.0 && max_dim / distance < 0.005 {
+                    let lod_threshold = if distance > 150.0 { 0.008 }
+                        else if distance > 60.0 { 0.004 }
+                        else { 0.0 };
+                    if lod_threshold > 0.0 && max_dim / distance < lod_threshold {
                         return None;
                     }
 
@@ -350,17 +467,30 @@ impl Chams {
                         &window_offset,
                     )?;
 
-                    // Per-part wall check: check if this specific body part is behind a wall
-                    if let Some(ref mp) = map_parser {
-                        let part_pos = part.position;
-                        if !mp.is_visible(local_pos, part_pos) {
-                            hull.is_occluded = true;
-                        }
+                    if entity_occluded {
+                        hull.is_occluded = true;
                     }
 
                     Some(hull)
                 })
                 .collect()
+            };
+
+            // Fallback: if no parts passed the filter (e.g. newly spawned entity
+            // with only HumanoidRootPart, or extreme distance LOD), try rendering
+            // HumanoidRootPart so the entity isn't invisible.
+            let part_hulls = if part_hulls.is_empty() {
+                if let Some(hrp) = entity.parts.get(&BodyPart::HumanoidRootPart) {
+                    let mut hull = Self::compute_part_hull(
+                        hrp, velocity, visengine, dimensions, &view_matrix, &window_offset,
+                    );
+                    if entity_occluded { if let Some(ref mut h) = hull { h.is_occluded = true; } }
+                    hull.into_iter().collect()
+                } else {
+                    return None;
+                }
+            } else {
+                part_hulls
             };
 
             if part_hulls.is_empty() {
@@ -391,13 +521,16 @@ impl Chams {
             .order(egui::Order::Background)
             .interactable(false)
             .show(ctx, |ui| {
+                crate::perf_scope!("chams_draw");
+                ui.set_clip_rect(egui::Rect::EVERYTHING);
                 let painter = ui.painter();
 
+                crate::perf_scope!("chams_draw_cpu");
                 for entity_data in &chams_data {
-                    // Distance-based glow LOD: skip glow layers for far entities
-                    let glow_layers = if entity_data.distance > 120.0 { 0u8 }
-                                      else if entity_data.distance > 80.0 { 1 }
-                                      else { 2 };
+                    // Distance-based glow LOD: skip glow layers for far entities.
+                    let glow_layers: u8 = if entity_data.distance > 150.0 { 0 }
+                        else if entity_data.distance > 90.0 { 1 }
+                        else { 2 };
 
                     for hull in &entity_data.part_hulls {
                         if hull.vertices.len() < 3 {
@@ -405,7 +538,7 @@ impl Chams {
                         }
 
                         // Select colors based on whether this part is behind a wall
-                        let (fill_c, glow_c, outline_c) = if hull.is_occluded {
+                        let (fill_c, glow_c, _outline_c) = if hull.is_occluded {
                             (entity_data.occluded_fill_color, entity_data.occluded_glow_color, entity_data.occluded_outline_color)
                         } else {
                             (entity_data.fill_color, entity_data.glow_color, entity_data.outline_color)
@@ -419,25 +552,33 @@ impl Chams {
 
                         // Glow layers (skip for distant entities to reduce shape count)
                         if glow_layers >= 2 {
-                            Self::draw_expanded_polygon(painter, &points, 4.0, 
+                            Self::draw_expanded_polygon(painter, &points, 4.0,
                                 egui::Color32::from_rgba_unmultiplied(
                                     glow_c.r(), glow_c.g(), glow_c.b(), 20,
                                 )
                             );
                         }
                         if glow_layers >= 1 {
-                            Self::draw_expanded_polygon(painter, &points, 2.5, 
+                            Self::draw_expanded_polygon(painter, &points, 2.5,
                                 egui::Color32::from_rgba_unmultiplied(
                                     glow_c.r(), glow_c.g(), glow_c.b(), 40,
                                 )
                             );
                         }
 
-                        // Fill + outline combined into single shape (avoids clone)
+                        // Fill body part (no stroke — border drawn separately on top
+                        // so adjacent body part fills don't cover the borders).
                         painter.add(egui::Shape::convex_polygon(
-                            points,
+                            points.clone(),
                             fill_c,
-                            egui::Stroke::new(1.2, outline_c),
+                            egui::Stroke::NONE,
+                        ));
+
+                        // Black cel-shaded outline on top — professional look with
+                        // crisp body part separation like toon shading.
+                        painter.add(egui::Shape::closed_line(
+                            points,
+                            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 200)),
                         ));
                     }
                 }
@@ -513,266 +654,5 @@ impl Chams {
             )
         }
     }
-
-    /// Get mesh chams outline + subtle fill colors based on distance.
-    /// Returns (outline_color, faint_fill_color).
-    fn get_mesh_distance_colors(distance: f32) -> (egui::Color32, egui::Color32) {
-        if distance < 30.0 {
-            // Bright green
-            (
-                egui::Color32::from_rgba_unmultiplied(34, 255, 94, 240),
-                egui::Color32::from_rgba_unmultiplied(34, 197, 94, 18),
-            )
-        } else if distance < 80.0 {
-            // Cyan/teal
-            (
-                egui::Color32::from_rgba_unmultiplied(20, 230, 200, 230),
-                egui::Color32::from_rgba_unmultiplied(20, 184, 166, 15),
-            )
-        } else if distance < 150.0 {
-            // Yellow/amber
-            (
-                egui::Color32::from_rgba_unmultiplied(255, 210, 50, 220),
-                egui::Color32::from_rgba_unmultiplied(251, 191, 36, 12),
-            )
-        } else {
-            // Red
-            (
-                egui::Color32::from_rgba_unmultiplied(255, 80, 80, 200),
-                egui::Color32::from_rgba_unmultiplied(239, 68, 68, 10),
-            )
-        }
-    }
-
-    /// Render mesh chams — lightweight outline-only mode for all visible players.
-    ///
-    /// Draws a crisp bright outline tracing each body part's silhouette,
-    /// with an optional faint colour fill controlled by `mesh_chams_fill`.
-    /// No glow layers — this is a clean wireframe look distinct from filled chams.
-    /// Fully compatible with wall_check — occluded parts get dimmed colors.
-    pub fn render_mesh(
-        ctx: &egui::Context,
-        cache: &Arc<Cache>,
-        visengine: &Arc<VisualEngine>,
-        config: &Config,
-        aim_target_name: Option<&str>,
-        local_player_name: &str,
-    ) {
-        if !config.visuals.mesh_chams {
-            return;
-        }
-        let snapshot = cache.get_snapshot();
-        if snapshot.is_empty() {
-            return;
-        }
-
-        let view_matrix = visengine.get_view_matrix();
-        let dimensions = visengine.get_dimensions();
-        let window_offset = visengine.get_window_offset();
-
-        if dimensions.x <= 0.0 || dimensions.y <= 0.0 {
-            return;
-        }
-
-        let max_distance = config.visuals.max_distance;
-        let target_highlight = config.visuals.target_highlight;
-        let team_check = config.visuals.team_check;
-        let hide_dead = config.visuals.hide_dead;
-        let wall_check = config.visuals.wall_check;
-
-        let local_entity = snapshot
-            .iter()
-            .find(|e| e.name.eq_ignore_ascii_case(local_player_name));
-
-        // When dead/spectating, fall back to Camera position
-        let local_pos = local_entity
-            .and_then(|e| {
-                if e.is_dead() { return None; }
-                e.parts.get(&BodyPart::Head)
-                    .or_else(|| e.parts.get(&BodyPart::HumanoidRootPart))
-                    .map(|p| p.position)
-            })
-            .or_else(|| visengine.get_camera_position())
-            .unwrap_or(Vector3::ZERO);
-
-        let local_team = cache.get_local_team_addr();
-        let local_team_identifier = cache.get_local_team_id();
-        let game_id = cache.get_game_id();
-
-        let teammate_whitelist = &config.visuals.teammate_whitelist;
-        let teammate_addresses: AHashSet<u64> = if team_check && !teammate_whitelist.is_empty() {
-            snapshot.iter()
-                .filter(|e| teammate_whitelist.iter().any(|name| name.eq_ignore_ascii_case(&e.name)))
-                .map(|e| e.model_address)
-                .collect()
-        } else {
-            AHashSet::new()
-        };
-
-        let use_parallel = snapshot.len() > 4;
-        let show_fill = config.visuals.mesh_chams_fill;
-
-        /// Per-entity mesh chams data
-        struct MeshEntityData {
-            part_hulls: Vec<PartHull>,
-            outline_color: egui::Color32,
-            fill_color: egui::Color32,
-            occluded_outline: egui::Color32,
-            occluded_fill: egui::Color32,
-        }
-
-        let compute_entity = |entity: &crate::utils::cache::Entity| -> Option<MeshEntityData> {
-            if entity.name.eq_ignore_ascii_case(local_player_name) {
-                return None;
-            }
-            if hide_dead && entity.is_dead() {
-                return None;
-            }
-
-            let is_team = is_teammate(
-                entity, team_check, local_team, &teammate_addresses, &local_team_identifier, game_id,
-            );
-
-            let root_part = entity.root_part()?;
-            let root_pos = root_part.position;
-            if !root_pos.is_valid() || root_pos.is_near_origin(1.0) {
-                return None;
-            }
-
-            let distance = root_pos.distance_to(local_pos);
-            if distance > max_distance {
-                return None;
-            }
-
-            let is_aim_target = target_highlight
-                && aim_target_name
-                    .map(|name| entity.name.eq_ignore_ascii_case(name))
-                    .unwrap_or(false);
-
-            // Pick colors (outline + optional fill only — no glow in mesh mode)
-            let (outline_c, fill_c) = if is_team {
-                // Blue for teammates
-                (
-                    egui::Color32::from_rgba_unmultiplied(100, 160, 255, 220),
-                    egui::Color32::from_rgba_unmultiplied(59, 130, 246, 15),
-                )
-            } else if is_aim_target {
-                // Purple for aim target
-                (
-                    egui::Color32::from_rgba_unmultiplied(200, 120, 255, 245),
-                    egui::Color32::from_rgba_unmultiplied(168, 85, 247, 22),
-                )
-            } else {
-                Chams::get_mesh_distance_colors(distance)
-            };
-
-            // Occluded (behind wall) — dimmed version
-            let (occ_outline, occ_fill) = if is_team {
-                (
-                    egui::Color32::from_rgba_unmultiplied(60, 90, 150, 120),
-                    egui::Color32::from_rgba_unmultiplied(40, 70, 130, 8),
-                )
-            } else {
-                // Dim red for occluded enemies
-                (
-                    egui::Color32::from_rgba_unmultiplied(200, 60, 60, 130),
-                    egui::Color32::from_rgba_unmultiplied(160, 40, 40, 6),
-                )
-            };
-
-            let velocity = entity.velocity;
-            let map_parser = if wall_check { Some(get_map_parser()) } else { None };
-
-            let part_hulls: Vec<PartHull> = {
-                entity.parts.iter()
-                .filter(|(bp, _)| **bp != BodyPart::HumanoidRootPart)
-                .filter_map(|(_, part)| {
-                    // Skip tiny parts at distance — projected size < ~5px
-                    let max_dim = part.size.x.max(part.size.y).max(part.size.z);
-                    if distance > 50.0 && max_dim / distance < 0.005 {
-                        return None;
-                    }
-
-                    let mut hull = Chams::compute_part_hull(
-                        part,
-                        velocity,
-                        visengine,
-                        dimensions,
-                        &view_matrix,
-                        &window_offset,
-                    )?;
-
-                    if let Some(ref mp) = map_parser {
-                        if !mp.is_visible(local_pos, part.position) {
-                            hull.is_occluded = true;
-                        }
-                    }
-
-                    Some(hull)
-                })
-                .collect()
-            };
-
-            if part_hulls.is_empty() {
-                return None;
-            }
-
-            Some(MeshEntityData {
-                part_hulls,
-                outline_color: outline_c,
-                fill_color: fill_c,
-                occluded_outline: occ_outline,
-                occluded_fill: occ_fill,
-            })
-        };
-
-        let mesh_data: Vec<MeshEntityData> = if use_parallel {
-            snapshot.par_iter().filter_map(compute_entity).collect()
-        } else {
-            snapshot.iter().filter_map(compute_entity).collect()
-        };
-
-        // Draw — clean wireframe outlines (fill optional)
-        egui::Area::new(egui::Id::new("mesh_chams_overlay"))
-            .fixed_pos(egui::pos2(0.0, 0.0))
-            .order(egui::Order::Background)
-            .interactable(false)
-            .show(ctx, |ui| {
-                let painter = ui.painter();
-
-                for entity_data in &mesh_data {
-                    for hull in &entity_data.part_hulls {
-                        if hull.vertices.len() < 3 {
-                            continue;
-                        }
-
-                        let (outline_c, fill_c) = if hull.is_occluded {
-                            (entity_data.occluded_outline, entity_data.occluded_fill)
-                        } else {
-                            (entity_data.outline_color, entity_data.fill_color)
-                        };
-
-                        let points: Vec<egui::Pos2> = hull.vertices
-                            .iter()
-                            .map(|v| egui::pos2(v.x, v.y))
-                            .collect();
-
-                        // Optional colour fill inside the outline
-                        if show_fill {
-                            painter.add(egui::Shape::convex_polygon(
-                                points.clone(),
-                                fill_c,
-                                egui::Stroke::NONE,
-                            ));
-                        }
-
-                        // Crisp outline only — clean wireframe look
-                        painter.add(egui::Shape::closed_line(
-                            points,
-                            egui::Stroke::new(1.8, outline_c),
-                        ));
-                    }
-                }
-            });
-    }
 }
+

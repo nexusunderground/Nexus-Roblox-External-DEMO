@@ -1,25 +1,23 @@
+// Hitbox Expander feature (PREMIUM VERSION ONLY)
+
 use std::sync::Arc;
 use crate::config::HitboxConfig;
-use crate::core::Memory;
-use crate::sdk::Instance;
+use crate::core::memory::Memory;
 use crate::utils::cache::Cache;
 
-pub struct HitboxExpander {
-    _memory: Arc<Memory>,
-}
+pub struct HitboxExpander;
 
 impl HitboxExpander {
-    pub fn new(memory: Arc<Memory>, _cache: Arc<Cache>, _local_player_name: String) -> Self {
-        Self { _memory: memory }
+    pub fn new(_memory: Arc<Memory>, _cache: Arc<Cache>, _local_player_name: String) -> Self {
+        Self
     }
-
-    pub fn update(&mut self, _config: &HitboxConfig, _players_instance: &Instance) {}
-    pub fn restore_all_hitboxes(&mut self) {}
-
-    #[allow(dead_code)]
-    pub fn get_stats(&self) -> (usize, bool) { (0, false) }
+    
+    pub fn update(&mut self, _config: &HitboxConfig) {
+        // PREMIUM VERSION ONLY
+    }
+    
+    pub fn disable(&mut self) {
+        // PREMIUM VERSION ONLY
+    }
 }
 
-impl Drop for HitboxExpander {
-    fn drop(&mut self) {}
-}

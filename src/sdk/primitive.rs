@@ -7,7 +7,6 @@ use crate::core::offsets::{base_part, primitive, primitive_flags};
 use crate::sdk::Instance;
 use crate::utils::math::{Matrix3, Vector3};
 
-/// Represents a BasePart (body parts, terrain, etc.).
 pub struct Part {
     instance: Instance,
 }
@@ -68,7 +67,6 @@ impl Part {
     }
 }
 
-/// Represents a Primitive (physics body).
 pub struct Primitive {
     pub address: u64,
     memory: Arc<Memory>,

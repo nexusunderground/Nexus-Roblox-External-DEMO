@@ -6,7 +6,6 @@ use crate::core::memory::{is_valid_address, Memory};
 use crate::core::offsets::{camera, visual_engine};
 use crate::utils::math::{Matrix4, Vector2, Vector3, Vector4};
 
-/// Represents the Visual Engine (camera/rendering).
 pub struct VisualEngine {
     pub address: u64,
     memory: Arc<Memory>,
@@ -17,11 +16,14 @@ impl VisualEngine {
         Self { address, memory }
     }
 
+    pub fn memory(&self) -> Arc<Memory> {
+        Arc::clone(&self.memory)
+    }
+
     pub fn get_dimensions(&self) -> Vector2 {
         self.memory.read::<Vector2>(self.address + visual_engine::dimensions())
     }
 
-    #[inline]
     pub fn screen_center(&self) -> Vector2 {
         let d = self.get_dimensions();
         Vector2::new(d.x / 2.0, d.y / 2.0)
@@ -31,7 +33,7 @@ impl VisualEngine {
         self.memory.read::<Matrix4>(self.address + visual_engine::view_matrix())
     }
 
-    /// Resolves camera address, then reads Camera.Position.
+    /// Get the camera's world position.
     pub fn get_camera_position(&self) -> Option<Vector3> {
         let cam_addr = self.memory.resolve_camera_address()?;
         let pos_addr = cam_addr + camera::position();
@@ -46,7 +48,6 @@ impl VisualEngine {
         }
     }
 
-    /// Client area offset for correct windowed ESP positioning.
     #[cfg(target_os = "windows")]
     pub fn get_window_offset(&self) -> Vector2 {
         use windows::Win32::Foundation::{POINT, RECT};
@@ -70,7 +71,6 @@ impl VisualEngine {
     }
 
  
-    /// World → screen. Returns None if behind camera or outside frustum.
     pub fn world_to_screen(
         &self,
         world: Vector3,
@@ -96,8 +96,7 @@ impl VisualEngine {
         Some(Vector2::new(screen_x, screen_y))
     }
 
-    /// Like world_to_screen but without frustum cull — for tracers.
-    /// Off-screen coords are fine since egui clips lines automatically.
+    /// Wide-frustum projection — does not clamp NDC, for tracer lines.
     pub fn world_to_screen_wide(
         &self,
         world: Vector3,
@@ -105,18 +104,13 @@ impl VisualEngine {
         view: &Matrix4,
     ) -> Option<Vector2> {
         let clip = view.transform(Vector4::new(world.x, world.y, world.z, 1.0));
-
-        // Behind camera — no tracer
         if clip.w < 0.001 {
             return None;
         }
-
         let ndc_x = clip.x / clip.w;
         let ndc_y = clip.y / clip.w;
-
         let screen_x = (dims.x * 0.5) * ndc_x + (dims.x * 0.5);
         let screen_y = -(dims.y * 0.5) * ndc_y + (dims.y * 0.5);
-
         Some(Vector2::new(screen_x, screen_y))
     }
 

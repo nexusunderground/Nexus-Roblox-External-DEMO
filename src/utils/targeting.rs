@@ -1,24 +1,28 @@
+//! Shared target-finding logic for all aim systems.
+//!
+//! Eliminates duplication of snapshot → filter → FOV → priority
+//! across targeting.rs, camera_aim.rs, and viewport.rs.
+
 use ahash::AHashSet;
 use std::sync::Arc;
 
 use crate::config::Config;
 use crate::sdk::VisualEngine;
 use crate::utils::cache::{BodyPart, Cache, Entity};
-use crate::utils::game_support::GameId;
 use crate::utils::math::{Vector2, Vector3};
 use crate::utils::velocity::is_teammate;
 
+/// Shared context needed for target finding — built once, reused.
 pub struct TargetContext {
     pub snapshot: Arc<Vec<Entity>>,
     pub local_team: u64,
-    pub local_team_id: String,
     pub teammate_addresses: AHashSet<u64>,
     pub screen_center: Vector2,
     pub dimensions: Vector2,
-    pub game_id: GameId,
 }
 
 impl TargetContext {
+    /// Build the target context from cache + config.
     pub fn build(
         cache: &Cache,
         visengine: &VisualEngine,
@@ -32,10 +36,7 @@ impl TargetContext {
 
         let snapshot = cache.get_snapshot();
         let screen_center = Vector2::new(dimensions.x / 2.0, dimensions.y / 2.0);
-
         let local_team = cache.get_local_team_addr();
-        let local_team_id = cache.get_local_team_id();
-        let game_id = cache.get_game_id();
 
         let teammate_whitelist = &config.visuals.teammate_whitelist;
         let teammate_addresses: AHashSet<u64> =
@@ -56,11 +57,9 @@ impl TargetContext {
         Some(Self {
             snapshot,
             local_team,
-            local_team_id,
             teammate_addresses,
             screen_center,
             dimensions,
-            game_id,
         })
     }
 
@@ -76,22 +75,13 @@ impl TargetContext {
         if entity.name.eq_ignore_ascii_case(local_player_name) {
             return true;
         }
-        if is_teammate(
-            entity,
-            team_check,
-            self.local_team,
-            &self.teammate_addresses,
-            &self.local_team_id,
-            self.game_id,
-        ) {
+        if is_teammate(entity, team_check, self.local_team, &self.teammate_addresses) {
             return true;
         }
         if hide_dead && entity.is_dead() {
             return true;
         }
-        // Skip entities without humanoid UNLESS they're game-specific or have valid body parts
-        if entity.humanoid_address == 0 && !entity.is_game_specific && entity.root_part().is_none()
-        {
+        if entity.humanoid_address == 0 && entity.root_part().is_none() {
             return true;
         }
         false
@@ -137,17 +127,16 @@ pub fn get_bone_with_fallback(entity: &Entity, preferred: &str) -> Option<Vector
 }
 
 /// Compute target priority score (lower = better).
+/// Health-weighted + proximity bonus.
 #[inline]
-pub fn compute_priority(entity: &Entity, screen_dist: f32, world_dist: f32) -> f32 {
+pub fn compute_priority(entity: &Entity, screen_dist: f32, world_dist: f32, prioritize_health: bool) -> f32 {
     let mut priority = screen_dist;
 
-    // Low health = higher priority (finish the kill)
-    if entity.max_health > 0.0 {
+    if prioritize_health && entity.max_health > 0.0 {
         let health_pct = entity.health / entity.max_health;
         priority *= 0.3 + health_pct * 0.7;
     }
 
-    // Close targets are more threatening
     if world_dist < 50.0 {
         let threat_bonus = 1.0 - (world_dist / 50.0) * 0.2;
         priority *= threat_bonus;
