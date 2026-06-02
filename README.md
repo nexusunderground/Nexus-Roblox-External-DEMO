@@ -1,205 +1,184 @@
-# Nexus Underground — Demo
+# Nexus Underground [Demo Version]
 
-An external Roblox overlay built in Rust with a modern [egui](https://github.com/emilk/egui) interface.  
-This is the **free demo** — premium features are locked. Join the Discord for full access.
+A Rust-based external overlay tool with a modern GUI interface built using egui.
 
-[![Discord](https://img.shields.io/badge/Discord-Nexus%20Underground-5865F2?logo=discord&logoColor=white)](https://tr.ee/NexusD)
+## Debug Modes (Glow) - For NVIDIA/GPU Transparency Issues
 
----
+If you have a **black overlay** or **click-through not working**, try these modes:
 
-## Features
+| Flag       | Description                                    | When to Use |
+|------      |-------------                                   |-------------|
+| `-glow1`   | Default: transparent, maximized, click-through | Works on most systems |
+| `-glow2`   | Non-transparent full-size overlay              | Diagnose alpha/clear issues |
+| `-glow3`   | Transparent + MSAA off + VSync off             | **Fixes most NVIDIA issues** |
+| `-glow4`   | Adds Windows `WS_EX_TRANSPARENT` style         | Extra click-through reliability |
+| `-novsync` | Disable VSync (can combine with others)        | If overlay flickers |
+| `-msaa0`   | Disable MSAA (can combine with others)         | If overlay is black |
 
-### Visuals
-| Feature | Demo | Premium |
-|---|---|---|
-| Box ESP (2D bounding boxes, distance colours) | ✅ | ✅ |
-| Name Tags + Distance | ✅ | ✅ |
-| Tracers | ✅ | ✅ |
-| Health & Armor Bars | ✅ | ✅ |
-| Team / Target Highlighting | ✅ | ✅ |
-| Dead-Player Filter | ✅ | ✅ |
-| Wall Check (visibility) | ❌ | ✅ |
-| Footprints & Movement Trails | ✅ | ✅ |
-| Chams (3D player fill) | ❌ | ✅ |
-| Mesh Chams | ❌ | ✅ |
+### Quick Start Guide
 
-### Aimbot
-| Feature | Demo | Premium |
-|---|---|---|
-| Aim Assist (FOV, smoothing, prediction) | ✅ | ✅ |
-| Camera Aim | ✅ | ✅ |
-| Viewport Aim | ✅ | ✅ |
-| Triggerbot | ❌ | ✅ |
-| Auto Reload | ✅ | ✅ |
-| Mouse Silent Aim | ❌ | ✅ |
-
-### Movement
-| Feature | Demo | Premium |
-|---|---|---|
-| Walk Speed | ✅ | ✅ |
-| Jump Power | ✅ | ✅ |
-| Auto-Jump | ✅ | ✅ |
-| Spinbot | ❌ | ✅ |
-| Noclip | ✅ | ✅ |
-| Click Teleport | ❌ | ✅ |
-| Waypoint | ❌ | ✅ |
-| Anchor | ❌ | ✅ |
-| No Fall Damage | ❌ | ✅ |
-| Hip Height | ✅ | ✅ |
-| Void Hide | ❌ | ✅ |
-| Free Camera | ✅ | ✅ |
-| Fly | ❌ | ✅ |
-| Vehicle Fly | ❌ | ✅ |
-| Spiderman | ❌ | ✅ |
-
-### World
-| Feature | Demo | Premium |
-|---|---|---|
-| FOV Changer | ✅ | ✅ |
-| Fullbright | ✅ | ✅ |
-| Anti-Fog | ✅ | ✅ |
-| No Shadows | ✅ | ✅ |
-| Brightness Control | ✅ | ✅ |
-| Anti-Flash | ✅ | ✅ |
-| Force Lighting | ✅ | ✅ |
-| Ambient Control | ✅ | ✅ |
-
-### Combat & Misc
-| Feature | Demo | Premium |
-|---|---|---|
-| Anti-AFK | ✅ | ✅ |
-| Auto-Clicker | ✅ | ✅ |
-| Blade Ball Auto-Parry | ❌ | ✅ |
-| Hitbox Expander | ❌ | ✅ |
-| Desync | ❌ | ✅ |
-| Cosmetics (Korblox / Headless / Hide Face) | ❌ | ✅ |
-| DEX Explorer | ❌ | ✅ |
-
-### Game Support
-Nexus auto-detects the game and applies tuned settings for:
-- **Phantom Forces** — dedicated entity scanner
-- **Da Hood / Hood Modded** — mouse aim support
-- **RIVALS** — viewport aim support
-- **Blade Ball** — auto-parry system
-- **Operation One** — game-specific aim tuning
-- **Fallen / Aftermath** — dedicated entity scanner
-- **Blox Strike** — custom support
-- **Generic** — works on any Roblox experience
-
----
-
-## Requirements
-
-- **Windows 10 / 11**
-- **~6 GB** free disk space (first build)
-- Internet connection (for offsets & Cloudflare bypass)
-
----
-
-## Quick Start
-
-### 1. Install Rust
-
-> Video guide: <https://youtu.be/z1r9JIRpepk>
-
-1. Download **rustup-init.exe** from <https://rust-lang.org/tools/install/>
-2. Run and press **Enter** to accept defaults
-3. **Restart your PC**
-
-Verify:
+**If default works (most systems):**
 ```powershell
-rustc --version
+cargo run --release
 ```
 
-### 2. Install VS Code *(optional, recommended)*
+**If overlay is BLACK on NVIDIA GPU, try this first:**
+```powershell
+cargo run --release -- -glow3
+```
 
-Download from <https://code.visualstudio.com/download> and install the **rust-analyzer** extension.
+**If still black, try:**
+```powershell
+cargo run --release -- -glow3 -glow4
+```
 
-### 3. Download & Extract
+**Other combinations to test:**
+```powershell
+cargo run --release -- -glow1 -novsync -msaa0
+cargo run --release -- -glow4
+```
 
-Download the source from the releases page and extract to a folder, e.g. `C:\Nexus\`.
+---
 
-### 4. Build
+## Active Features
 
-Open a terminal in the extracted folder (the one containing `Cargo.toml`):
+### Visuals
+- **Box ESP** - 2D bounding boxes around players
+  - Distance-based coloring: Green (0-30m), Teal (30-80m), Yellow (80-150m), Red (150m+)
+  - Health and armor bars
+  - Team highlighting (blue), target highlighting (magenta on current aim target)
+  - Configurable box style, fill, and custom colors
+- **Name Tags** - Player names with optional distance label
+- **Tracers** - Lines from screen edge to player positions
+- **Chams Glow** - Player outline/glow effect (no mesh CDN required)
+- **FOV Changer** - Camera field of view (1–120°)
+- **Distance Colors** - Automatic color scaling by range
+- **Target Highlight** - Magenta box on the currently locked aim target
+
+#### ESP Filters
+- **Team Check** - Whitelist system; add teammate names to skip them in ESP and aimbot
+- **Hide Dead** - Suppress dead players from the overlay
+- **Show Bots/NPCs** - Include non-player entities
+- **Max Distance** - Configurable render cutoff (50–1000 m)
+
+---
+
+### Aiming
+
+All aim systems share a global **velocity prediction** toggle with configurable lead time.
+Hold **RMB** to activate aim systems.
+
+| System | Description |
+|--------|-------------|
+| **Aim Assist** | FOV-guided smoothed mouse guidance. Configurable FOV, smoothing, bone target, activation mode (hold/toggle), and hold delay. |
+| **Mouse Aim** | Raw `SendInput` cursor movement. Configurable FOV, smoothing, and bone target. |
+| **Camera Aim** | Spoofs the Roblox camera CFrame rotation directly. Configurable FOV and bone target. |
+| **Viewport Aim** | Writes a target offset into the camera viewport CFrame. Configurable FOV. |
+
+All four systems display an optional **FOV circle** on screen.
+
+- **Auto Reload** - Automatically reloads weapons when the magazine is empty
+
+---
+
+### Movement
+- **Walk Speed** - Adjustable humanoid walk speed (16–500)
+- **Jump Power** - Configurable jump height (50–300)
+- **Auto-Jump** - Continuously jumps while grounded
+- **Spinbot** - Continuous yaw rotation; configurable speed (1–30°)
+
+---
+
+### World
+- **Anti-Fog** - Pushes fog start/end distances to eliminate fog rendering
+- **Brightness** - Overrides scene ambient brightness
+- **Anti-Flash** - Clamps maximum brightness to prevent flashbang-style effects
+
+---
+
+### Auto-Clicker
+- Record any mouse button sequence (LMB, RMB, side buttons, etc.)
+- Configurable delay, variance, and hold duration per click
+- Turbo mode (no delays)
+- Press **F10** to start/stop while in-game
+
+---
+
+### Hitbox Modifier
+- Expands or shrinks hitbox primitive sizes on all players
+- Visual wireframe preview in-overlay
+
+---
+
+### Utility
+- **Hotkey System** - 10 fully customizable hotkey slots (bind any key to any feature)
+- **Hotkey Hints HUD** - Floating widget showing active binds and toggle states
+- **Configuration** - TOML-based config; auto-saves on exit, manual save with `End`
+- **Cache System** - Background thread tracking all players with velocity history
+- **Custom Accent Color** - RGB accent picker for the menu UI
+
+
+---
+
+## Setup Guide
+
+**Requirements:** Windows 10 or 11, ~6 GB free disk space, internet connection
+
+**Step 1: Install Rust**
+
+Go to https://rust-lang.org/tools/install, download and run `rustup-init.exe`, press Enter to accept defaults, then restart.
+
+Verify: `rustc --version`
+
+**Step 2: Build**
 
 ```powershell
+cd "C:\path\to\Nexus (demo)"
 cargo build --release
 ```
 
-> First build takes **5–10 minutes** — this is normal.
+First build takes 5-10 minutes. Subsequent builds are much faster.
 
-### 5. Run
+**Step 3: Run**
 
 ```powershell
 cargo run --release
 ```
 
-Or launch `target\release\nexus.exe` directly.
-
----
-
-## NVIDIA / GPU Overlay Fixes
-
-If you see a **black overlay** or click-through isn't working, try these flags:
-
-| Flag | What it does | When to use |
-|------|-------------|-------------|
-| `-glow1` | Default transparent overlay | Most systems |
-| `-glow2` | Non-transparent full-size overlay | Diagnose alpha issues |
-| `-glow3` | Transparent + MSAA off + VSync off | **Fixes most NVIDIA issues** |
-| `-glow4` | Adds `WS_EX_TRANSPARENT` style | Extra click-through reliability |
-| `-novsync` | Disable VSync *(combinable)* | Overlay flickers |
-| `-msaa0` | Disable MSAA *(combinable)* | Overlay is black |
-
-**Recommended for NVIDIA:**
-```powershell
-cargo run --release -- -glow3
-```
-
-**Still black?**
-```powershell
-cargo run --release -- -glow3 -glow4
-```
+Or double-click `target\release\nexus.exe`
 
 ---
 
 ## Configuration
 
-On first run Nexus creates `config.toml` next to the executable.  
-**Set your Roblox username** so the overlay can identify your character — you'll be prompted on first launch.
-
-Settings can be changed in-game via the menu (**F1**) or by editing `config.toml` directly.
+A `config.toml` is created next to the executable on first run. Set your Roblox username so you are excluded from ESP and aimbot targeting, then restart.
 
 ---
 
-## Default Hotkeys
+## Hotkeys
 
-| Key | Action |
-|-----|--------|
-| **F1** | Toggle menu |
-| **F2** | Box ESP |
-| **F3** | Chams *(premium)* |
-| **F4** | Aim Assist |
-| **F5** | Camera Aim |
-| **F6** | Fly *(premium)* |
-| **F7** | Tracers |
-| **F8** | Noclip |
-| **F9** | Hitbox Mod *(premium)* |
-| **Insert** | Spinbot |
-| **Home** | Refresh game data |
-| **End** | Save config |
-| **F12** | Exit |
+| Key    | Function      | Notes |
+|--------|---------------|-------|
+| F1     | Toggle Menu   | |
+| F2     | Box ESP       | |
+| F3     | Chams Glow    | |
+| F4     | Aim Assist    | |
+| F5     | Camera Aim    | |
+| F7     | Tracers       | |
+| F10    | Auto-Clicker  | Start/stop |
+| F11    | Hitbox Mod    | |
+| F12    | Exit          | |
+| Home   | Refresh       | Full game data refresh |
+| End    | Save Config   | |
 
-All hotkeys are fully remappable in the menu.
+All 10 hotkey slots are fully customizable in the **Hotkeys** tab.
 
 ---
 
-## Get Premium
+## Join Our Community
 
-The full version includes every feature unlocked, priority support, and early access to updates.
-
-**Discord:** <https://tr.ee/NexusD>
+**Discord:** https:/tr.ee/NexusD
+**Get the full version with all premium features!**
 
 ---
 
@@ -209,5 +188,4 @@ For educational and research purposes only.
 
 ---
 
-*"My crime is that of curiosity"* — Nexus Underground
-
+*"My crime is that of curiosity"* - NexusUnderground
